@@ -84,7 +84,6 @@ func (checker *Checker) checkAllAndReport(ctx context.Context) {
 
 func (checker *Checker) check(url string) Result {
 	resp, err := checker.client.Get(url)
-
 	if err != nil {
 		return Result{
 			Url:        url,
