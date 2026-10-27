@@ -2,15 +2,15 @@ package monitor
 
 import "time"
 
-type Incident struct {
-	Details    string
-	Code       int
-	ResolvedAt time.Time
+type incident struct {
+	details    string
+	code       int
+	resolvedAt time.Time
 }
 
-func NewIncident(details string, code int) Incident {
-	return Incident{
-		Details: details,
-		Code:    code,
+func NewIncident(details string, code int) incident {
+	return incident{
+		details: details,
+		code:    code,
 	}
 }

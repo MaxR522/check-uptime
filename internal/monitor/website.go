@@ -1,7 +1,7 @@
 package monitor
 
-type Website struct {
-	ID   int
-	URL  string
-	Name string
+type website struct {
+	id   int
+	urls []url
+	name string
 }
