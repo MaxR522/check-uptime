@@ -3,14 +3,9 @@ package monitor
 import "time"
 
 type incident struct {
-	details    string
-	code       int
+	id         int
+	reason     string
 	resolvedAt time.Time
-}
-
-func NewIncident(details string, code int) incident {
-	return incident{
-		details: details,
-		code:    code,
-	}
+	startedAt  time.Time
+	endpointID int
 }

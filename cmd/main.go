@@ -1,7 +1,15 @@
 package main
 
-import "fmt"
+import (
+	"context"
+
+	"github.com/MaxR522/check-uptime/internal/monitor"
+)
 
 func main() {
-	fmt.Println("GOOOOOOO")
+	context := context.Background()
+	service := monitor.NewService(nil)
+	checker := monitor.NewChecker(service)
+
+	checker.RunChecker(context)
 }

@@ -1,7 +1,8 @@
 package monitor
 
 type website struct {
-	id   int
-	urls []url
-	name string
+	id        int
+	name      string
+	baseURL   string
+	endpoints []endpoint
 }

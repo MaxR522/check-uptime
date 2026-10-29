@@ -22,6 +22,22 @@ Allowed:
 - Suggest tests the user should write.
 - Run read-only commands and report the results: `go build ./...`, `go vet ./...`, `go test ./...`, `go test -race ./...`, `gofmt -l .`.
 - Edit documentation (`docs/`, `README.md`, this file) only when the user explicitly asks.
+- Write the daily learning log described in "Learning log" below.
+
+## Learning log
+
+At the end of each working day or session (when the user says they are stopping, or asks for it), write a learning log in `docs/learning/YYYY-MM-DD.md`. If a log for that date already exists, add to it instead of creating a new one.
+
+The log is for the user to reread so they don't repeat mistakes. Content:
+
+- Go concepts and idioms learned in the session, each with a short explanation of the why and a small snippet.
+- Mistakes made in the session: what the mistake was, why it was wrong, how to spot it next time. Write it neutrally, as a lesson, not as a list of failures.
+- Standard library APIs used, with the doc behavior that mattered.
+- Tools that helped (gopls analyzers, `go vet`, tests).
+- A short self-review checklist built from the day's mistakes.
+- Open items for the next session.
+
+Base the content only on what happened in the session. Snippets illustrate concepts; they are not copies of the user's solution.
 
 ## Project
 

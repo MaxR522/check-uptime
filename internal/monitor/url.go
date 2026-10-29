@@ -1,16 +1,12 @@
 package monitor
 
-import (
-	"net/http"
-	"time"
-)
-
-type url struct {
-	path                string
-	intervalCheckMinute int
-	assertions          []assertion
-}
-
-type assertion interface {
-	Check(resp *http.Response, body []byte, duration time.Duration) error
+type endpoint struct {
+	id               int
+	path             string
+	websiteID        int
+	intervalCheckMin int
+	timeoutSec       float64
+	enabled          bool
+	expectations     []expectation
+	incidents        []incident
 }
