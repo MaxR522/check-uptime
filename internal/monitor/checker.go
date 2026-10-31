@@ -29,7 +29,13 @@ func NewChecker(service *Service) *Checker {
 }
 
 func (c *Checker) RunChecker(ctx context.Context) {
-	results, err := c.checkAllEndpoints(ctx)
+	websites, err := c.service.GetWebsites(ctx)
+	if err != nil {
+		log.Println(err.Error())
+		return
+	}
+
+	results, err := c.checkAllEndpoints(ctx, websites)
 	if err != nil {
 		log.Println(err.Error())
 		return
@@ -50,12 +56,7 @@ func (c *Checker) RunChecker(ctx context.Context) {
 	}
 }
 
-func (c *Checker) checkAllEndpoints(ctx context.Context) (<-chan checkResult, error) {
-	websites, err := c.service.GetWebsites(ctx)
-	if err != nil {
-		return nil, err
-	}
-
+func (c *Checker) checkAllEndpoints(ctx context.Context, websites []website) (<-chan checkResult, error) {
 	resultChan := make(chan checkResult)
 
 	go func() {
@@ -74,14 +75,29 @@ func (c *Checker) checkAllEndpoints(ctx context.Context) (<-chan checkResult, er
 					continue
 				}
 
-				ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Duration(endpoint.timeoutSec*float64(time.Second)))
+				if endpoint.intervalCheckMin <= 0 {
+					log.Printf("invalid intervalCheckMin %d for %s", endpoint.intervalCheckMin, fullURL)
+					continue
+				}
+
+				if endpoint.timeoutSec <= 0 {
+					log.Printf("invalid timeoutSec %d for %s", endpoint.timeoutSec, fullURL)
+					continue
+				}
 
 				wg.Go(func() {
-					defer cancel()
-					result := checkEndpoint(ctxWithTimeout, c.client, fullURL, endpoint.id)
-					select {
-					case resultChan <- result:
-					case <-ctx.Done():
+					ticker := time.NewTicker(time.Duration(endpoint.intervalCheckMin) * time.Minute)
+					defer ticker.Stop()
+
+					runCheckEndpoint(ctx, c.client, endpoint, fullURL, resultChan)
+
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case <-ticker.C:
+							runCheckEndpoint(ctx, c.client, endpoint, fullURL, resultChan)
+						}
 					}
 				})
 			}
@@ -100,6 +116,16 @@ func buildURL(baseURL, path string) (string, error) {
 	}
 
 	return fullURL, nil
+}
+
+func runCheckEndpoint(ctx context.Context, client *http.Client, ep endpoint, targetURL string, resultChan chan<- checkResult) {
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Duration(ep.timeoutSec*float64(time.Second)))
+	result := checkEndpoint(ctxWithTimeout, client, targetURL, ep.id)
+	cancel()
+	select {
+	case resultChan <- result:
+	case <-ctx.Done():
+	}
 }
 
 func checkEndpoint(ctx context.Context, client *http.Client, target string, endpointID int) checkResult {

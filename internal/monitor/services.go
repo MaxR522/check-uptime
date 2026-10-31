@@ -34,7 +34,7 @@ func (s *Service) GetWebsites(ctx context.Context) ([]website, error) {
 		id:               2,
 		path:             "home",
 		websiteID:        1,
-		intervalCheckMin: 1,
+		intervalCheckMin: 2,
 		timeoutSec:       30,
 		enabled:          true,
 		expectations:     nil,
