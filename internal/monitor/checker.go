@@ -35,8 +35,18 @@ func (c *Checker) RunChecker(ctx context.Context) {
 		return
 	}
 
-	for r := range results {
-		log.Println(r.String())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case r, ok := <-results:
+			if !ok {
+				return
+			}
+
+			// to-do: save the resut
+			fmt.Println(r)
+		}
 	}
 }
 
