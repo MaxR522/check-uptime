@@ -81,7 +81,7 @@ func (c *Checker) checkAllEndpoints(ctx context.Context, websites []website) (<-
 				}
 
 				if endpoint.timeoutSec <= 0 {
-					log.Printf("invalid timeoutSec %d for %s", endpoint.timeoutSec, fullURL)
+					log.Printf("invalid timeoutSec %f for %s", endpoint.timeoutSec, fullURL)
 					continue
 				}
 
