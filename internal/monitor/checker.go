@@ -15,11 +15,13 @@ const maxBodyBytes = 1 << 20
 const maxErrorBodyBytes = 250
 
 type Checker struct {
-	service *Service
+	service *service
 	client  *http.Client
 }
 
-func NewChecker(service *Service) *Checker {
+func NewChecker(store Store) *Checker {
+	service := newService(store)
+
 	return &Checker{
 		service: service,
 		client: &http.Client{
@@ -50,10 +52,39 @@ func (c *Checker) RunChecker(ctx context.Context) {
 				return
 			}
 
-			// to-do: save the resut
-			fmt.Println(r)
+			if r.errMsg != nil {
+				// report incident
+				newIncident := incident{
+					id:         0,
+					reason:     *r.errMsg,
+					startedAt:  time.Now(),
+					endpointID: r.endpointID,
+				}
+
+				fmt.Println(newIncident)
+				c.recordIncident(ctx, newIncident)
+			}
+
+			c.service.SaveResult(ctx, r)
 		}
 	}
+}
+
+func (c *Checker) recordIncident(ctx context.Context, newIncident incident) error {
+	// 1. check if the incident already exists for the endpointID
+	// 2. the incident is different that the already reported
+	// 3. save the incident
+	existingIncident, err := c.service.GetIncident(ctx, newIncident.endpointID)
+	if err != nil {
+		return err
+	}
+
+	if existingIncident.reason == newIncident.reason {
+		return fmt.Errorf("Already incident already created")
+	}
+
+	// c.service.SaveIncident(ctx, newIncident)
+	return nil
 }
 
 func (c *Checker) checkAllEndpoints(ctx context.Context, websites []website) (<-chan checkResult, error) {
@@ -159,7 +190,8 @@ func checkEndpoint(ctx context.Context, client *http.Client, target string, endp
 	}
 
 	if resp.StatusCode >= 400 {
-		result.errorBody = new(string(body[:min(len(body), maxErrorBodyBytes)]))
+		result.errBody = new(string(body[:min(len(body), maxErrorBodyBytes)]))
+		result.errMsg = new(resp.Status)
 	}
 
 	result.durationMs = time.Since(startTimer).Milliseconds()

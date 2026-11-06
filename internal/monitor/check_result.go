@@ -11,7 +11,7 @@ type checkResult struct {
 	durationMs int64
 	code       *int
 	errMsg     *string
-	errorBody  *string
+	errBody    *string
 	checkedAt  time.Time
 	endpointID int
 }
@@ -37,7 +37,7 @@ func (r checkResult) String() string {
 
 	fmt.Fprintf(&b, "duration=%dms ", r.durationMs)
 	fmt.Fprintf(&b, "error=%q ", deref(r.errMsg, ""))
-	fmt.Fprintf(&b, "errorBody=%q", deref(r.errorBody, ""))
+	fmt.Fprintf(&b, "errorBody=%q", deref(r.errBody, ""))
 	fmt.Fprintf(&b, "id=%d ", r.id)
 	fmt.Fprintf(&b, "endpoint=%d ", r.endpointID)
 

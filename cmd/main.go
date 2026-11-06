@@ -8,8 +8,7 @@ import (
 
 func main() {
 	context := context.Background()
-	service := monitor.NewService(nil)
-	checker := monitor.NewChecker(service)
+	checker := monitor.NewChecker(nil)
 
 	checker.RunChecker(context)
 }
