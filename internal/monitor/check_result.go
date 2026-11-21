@@ -37,9 +37,8 @@ func (r checkResult) String() string {
 
 	fmt.Fprintf(&b, "duration=%dms ", r.durationMs)
 	fmt.Fprintf(&b, "error=%q ", deref(r.errMsg, ""))
-	fmt.Fprintf(&b, "errorBody=%q", deref(r.errBody, ""))
-	fmt.Fprintf(&b, "id=%d ", r.id)
-	fmt.Fprintf(&b, "endpoint=%d ", r.endpointID)
+	fmt.Fprintf(&b, "errorBody=%q ", deref(r.errBody, ""))
+	fmt.Fprintf(&b, "endpoint=%d", r.endpointID)
 
 	return b.String()
 }

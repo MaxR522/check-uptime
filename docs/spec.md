@@ -52,9 +52,9 @@ A check fails if the request errors (DNS, connection, timeout) or if any asserti
 
 ### Incidents
 
-- When a check fails and the endpoint has no open incident, a new incident is opened with the failure reason and start time.
-- While the endpoint keeps failing, no new incident is created (at most one open incident per endpoint).
-- When a check passes and an incident is open, the incident is resolved (`resolved_at` set).
+- When a check fails and the endpoint has no open incident with the same reason, a new incident is opened with the failure reason and start time.
+- While the endpoint keeps failing with the same reason, no new incident is created. A different reason opens another incident, so an endpoint can have several open incidents, at most one per reason.
+- When a check passes, every open incident of the endpoint is resolved (`resolved_at` set).
 - Every check result is logged.
 
 ### Notifications

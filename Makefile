@@ -1,12 +1,12 @@
 run:
-	go run ./cmd
+	go run ./cmd/check-uptime
 
 build:
-	go build -o ./bin/cmd ./cmd
+	go build -o ./bin/check-uptime ./cmd/check-uptime
 
 format:
 	go fmt ./...
 
 # Execute the built binary
 preview:
-	./bin/cmd
+	./bin/check-uptime

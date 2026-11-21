@@ -1,0 +1,262 @@
+package monitor
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+	"unicode/utf8"
+)
+
+func TestCheckEndpoint(t *testing.T) {
+	// 249 ASCII bytes then a 2-byte rune: the cut at 250 splits the rune.
+	splitRuneBody := strings.Repeat("a", maxErrorBodyBytes-1) + "é" + "tail"
+
+	tests := []struct {
+		name        string
+		handler     http.HandlerFunc
+		timeout     time.Duration
+		wantCode    int // 0 means no status code
+		wantErr     bool
+		wantErrBody string
+	}{
+		{
+			name:     "ok",
+			handler:  func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) },
+			timeout:  time.Second,
+			wantCode: http.StatusOK,
+		},
+		{
+			name: "server error keeps body",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("boom"))
+			},
+			timeout:     time.Second,
+			wantCode:    http.StatusInternalServerError,
+			wantErr:     true,
+			wantErrBody: "boom",
+		},
+		{
+			name: "error body truncated on rune boundary",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte(splitRuneBody))
+			},
+			timeout:     time.Second,
+			wantCode:    http.StatusServiceUnavailable,
+			wantErr:     true,
+			wantErrBody: strings.Repeat("a", maxErrorBodyBytes-1),
+		},
+		{
+			name: "timeout",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case <-r.Context().Done():
+				case <-time.After(2 * time.Second):
+				}
+			},
+			timeout: 50 * time.Millisecond,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
+
+			ctx, cancel := context.WithTimeout(t.Context(), tt.timeout)
+			defer cancel()
+
+			got := checkEndpoint(ctx, srv.Client(), srv.URL, 7)
+
+			if got.endpointID != 7 {
+				t.Errorf("endpointID = %d, want 7", got.endpointID)
+			}
+			if gotCode := deref(got.code, 0); gotCode != tt.wantCode {
+				t.Errorf("code = %d, want %d", gotCode, tt.wantCode)
+			}
+			if (got.errMsg != nil) != tt.wantErr {
+				t.Errorf("errMsg = %q, wantErr %v", deref(got.errMsg, ""), tt.wantErr)
+			}
+			gotBody := deref(got.errBody, "")
+			if gotBody != tt.wantErrBody {
+				t.Errorf("errBody = %q, want %q", gotBody, tt.wantErrBody)
+			}
+			if !utf8.ValidString(gotBody) {
+				t.Errorf("errBody is not valid UTF-8: %q", gotBody)
+			}
+			if got.checkedAt.IsZero() {
+				t.Error("checkedAt not set")
+			}
+		})
+	}
+}
+
+func TestCheckEndpointConnectionRefused(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	target := srv.URL
+	srv.Close()
+
+	got := checkEndpoint(t.Context(), http.DefaultClient, target, 1)
+
+	if got.errMsg == nil {
+		t.Fatal("errMsg = nil, want connection error")
+	}
+	if got.code != nil {
+		t.Errorf("code = %d, want nil", *got.code)
+	}
+}
+
+func TestBuildURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		base    string
+		path    string
+		want    string
+		wantErr bool
+	}{
+		{name: "no slashes", base: "https://example.com", path: "health", want: "https://example.com/health"},
+		{name: "both slashes", base: "https://example.com/", path: "/health", want: "https://example.com/health"},
+		{name: "empty path", base: "https://example.com", path: "", want: "https://example.com"},
+		{name: "invalid base", base: "://bad", path: "health", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildURL(tt.base, tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// fakeStore records incidents and results; openErr makes OpenIncidents fail.
+type fakeStore struct {
+	open      map[int][]incident
+	openErr   error
+	incidents []incident
+	results   []checkResult
+}
+
+func (f *fakeStore) GetWebsites(ctx context.Context) ([]website, error) { return nil, nil }
+
+func (f *fakeStore) OpenIncidents(ctx context.Context, endpointID int) ([]incident, error) {
+	if f.openErr != nil {
+		return nil, f.openErr
+	}
+	return f.open[endpointID], nil
+}
+
+func (f *fakeStore) StoreIncident(ctx context.Context, inc incident) error {
+	f.incidents = append(f.incidents, inc)
+	return nil
+}
+
+func (f *fakeStore) StoreCheckResult(ctx context.Context, cr checkResult) error {
+	f.results = append(f.results, cr)
+	return nil
+}
+
+func TestRecordIncident(t *testing.T) {
+	failed := checkResult{endpointID: 3, errMsg: new("503 Service Unavailable"), checkedAt: time.Now()}
+	errDB := errors.New("db down")
+
+	tests := []struct {
+		name       string
+		store      *fakeStore
+		wantErr    error
+		wantStored int
+	}{
+		{name: "no open incident opens one", store: &fakeStore{}, wantStored: 1},
+		{
+			name:       "same reason already open is skipped",
+			store:      &fakeStore{open: map[int][]incident{3: {{id: 1, endpointID: 3, reason: "503 Service Unavailable"}}}},
+			wantStored: 0,
+		},
+		{
+			name:       "different reason opens another",
+			store:      &fakeStore{open: map[int][]incident{3: {{id: 1, endpointID: 3, reason: "404 Not Found"}}}},
+			wantStored: 1,
+		},
+		{
+			name:       "open incident on other endpoint ignored",
+			store:      &fakeStore{open: map[int][]incident{9: {{id: 1, endpointID: 9, reason: "503 Service Unavailable"}}}},
+			wantStored: 1,
+		},
+		{name: "lookup error returned", store: &fakeStore{openErr: errDB}, wantErr: errDB},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewChecker(tt.store)
+
+			err := c.recordIncident(t.Context(), failed)
+
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if len(tt.store.incidents) != tt.wantStored {
+				t.Fatalf("stored %d incidents, want %d", len(tt.store.incidents), tt.wantStored)
+			}
+			if tt.wantStored == 1 {
+				got := tt.store.incidents[0]
+				if got.endpointID != 3 || got.reason != "503 Service Unavailable" || !got.startedAt.Equal(failed.checkedAt) {
+					t.Errorf("incident = %+v", got)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckAllEndpoints(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+
+	valid := endpoint{id: 1, path: "ok", intervalCheckMin: 1, timeoutSec: 1, enabled: true}
+	websites := []website{{
+		baseURL: srv.URL,
+		endpoints: []endpoint{
+			valid,
+			{id: 2, path: "disabled", intervalCheckMin: 1, timeoutSec: 1, enabled: false},
+			{id: 3, path: "no-interval", intervalCheckMin: 0, timeoutSec: 1, enabled: true},
+			{id: 4, path: "no-timeout", intervalCheckMin: 1, timeoutSec: 0, enabled: true},
+		},
+	}}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	c := NewChecker(&fakeStore{})
+	c.client = srv.Client()
+	results := c.checkAllEndpoints(ctx, websites)
+
+	// Every endpoint is checked once immediately; only the valid one runs.
+	select {
+	case r := <-results:
+		if r.endpointID != valid.id {
+			t.Errorf("result for endpoint %d, want %d", r.endpointID, valid.id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no result for valid endpoint")
+	}
+
+	cancel()
+
+	// The next tick is a minute away, so after cancel the channel must close
+	// without another result.
+	select {
+	case r, ok := <-results:
+		if ok {
+			t.Fatalf("unexpected result for endpoint %d", r.endpointID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("results channel not closed after cancel")
+	}
+}
