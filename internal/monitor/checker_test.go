@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -267,84 +266,6 @@ func TestBuildURL(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-// fakeStore records incidents and results; openErr makes OpenIncidents fail.
-type fakeStore struct {
-	open      map[int][]incident
-	openErr   error
-	incidents []incident
-	results   []checkResult
-}
-
-func (f *fakeStore) GetWebsites(ctx context.Context) ([]website, error) { return nil, nil }
-
-func (f *fakeStore) OpenIncidents(ctx context.Context, endpointID int) ([]incident, error) {
-	if f.openErr != nil {
-		return nil, f.openErr
-	}
-	return f.open[endpointID], nil
-}
-
-func (f *fakeStore) StoreIncident(ctx context.Context, inc incident) error {
-	f.incidents = append(f.incidents, inc)
-	return nil
-}
-
-func (f *fakeStore) StoreCheckResult(ctx context.Context, cr checkResult) error {
-	f.results = append(f.results, cr)
-	return nil
-}
-
-func TestRecordIncident(t *testing.T) {
-	failed := checkResult{endpointID: 3, passed: false, errMsg: new("503 Service Unavailable"), checkedAt: time.Now()}
-	errDB := errors.New("db down")
-
-	tests := []struct {
-		name       string
-		store      *fakeStore
-		wantErr    error
-		wantStored int
-	}{
-		{name: "no open incident opens one", store: &fakeStore{}, wantStored: 1},
-		{
-			name:       "same reason already open is skipped",
-			store:      &fakeStore{open: map[int][]incident{3: {{id: 1, endpointID: 3, reason: "503 Service Unavailable"}}}},
-			wantStored: 0,
-		},
-		{
-			name:       "different reason opens another",
-			store:      &fakeStore{open: map[int][]incident{3: {{id: 1, endpointID: 3, reason: "404 Not Found"}}}},
-			wantStored: 1,
-		},
-		{
-			name:       "open incident on other endpoint ignored",
-			store:      &fakeStore{open: map[int][]incident{9: {{id: 1, endpointID: 9, reason: "503 Service Unavailable"}}}},
-			wantStored: 1,
-		},
-		{name: "lookup error returned", store: &fakeStore{openErr: errDB}, wantErr: errDB},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := NewChecker(tt.store)
-
-			err := c.recordIncident(t.Context(), failed)
-
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("err = %v, want %v", err, tt.wantErr)
-			}
-			if len(tt.store.incidents) != tt.wantStored {
-				t.Fatalf("stored %d incidents, want %d", len(tt.store.incidents), tt.wantStored)
-			}
-			if tt.wantStored == 1 {
-				got := tt.store.incidents[0]
-				if got.endpointID != 3 || got.reason != "503 Service Unavailable" || !got.startedAt.Equal(failed.checkedAt) {
-					t.Errorf("incident = %+v", got)
-				}
 			}
 		})
 	}

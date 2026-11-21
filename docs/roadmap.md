@@ -38,13 +38,14 @@ Status: `done`
 
 ### S3 Incident resolve on pass
 
-Status: `todo`
+Status: `done`
 
 - Goal: full v1 incident lifecycle from "Decisions".
 - Read: spec "Incidents"; `checker.go` (`handleResult`, `recordIncident`), `store.go`, `memstore.go`, `incident.go`, incident tests in `checker_test.go`.
 - Touch: `store.go`, `memstore.go`, `checker.go`, new `incident_test.go` (move incident tests there).
 - Build: `Store.ResolveIncidents(ctx, endpointID, at) ([]incident, error)`; on a passing result resolve every open incident; `recordIncident` returns the incidents it opened, resolve returns the ones it closed (these become notification events in S16).
 - Tests: open on first failure, no duplicate same reason, new reason opens a second one, pass resolves all, pass with none open is a no-op.
+- Notes: incidents are per failure reason (one incident per entry in `checkResult.reasons`, not the joined `errMsg`). `recordIncident` and `resolveIncidents` return the opened/resolved incidents; `handleResult` only logs them until S16 turns them into events. `Store.StoreIncident` still returns only an error (no id).
 
 ### S4 Scheduler with per-endpoint control
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"sync"
+	"time"
 )
 
 // maxMemoryResults bounds the check results MemoryStore keeps.
@@ -65,6 +66,18 @@ func (s *MemoryStore) StoreIncident(ctx context.Context, inc incident) error {
 	}
 	s.openIncidents[inc.endpointID] = open
 	return nil
+}
+
+func (s *MemoryStore) ResolveIncidents(ctx context.Context, endpointID int, at time.Time) ([]incident, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	resolved := slices.Clone(s.openIncidents[endpointID])
+	for i := range resolved {
+		resolved[i].resolvedAt = at
+	}
+	delete(s.openIncidents, endpointID)
+	return resolved, nil
 }
 
 func (s *MemoryStore) StoreCheckResult(ctx context.Context, cr checkResult) error {

@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -60,11 +61,22 @@ func (c *Checker) handleResult(ctx context.Context, r checkResult) {
 
 	if !r.passed {
 		logger.Warn("check failed", "err", deref(r.errMsg, ""))
-		if err := c.recordIncident(ctx, r); err != nil {
+		opened, err := c.recordIncident(ctx, r)
+		if err != nil {
 			logger.Error("record incident", "err", err)
+		}
+		for _, inc := range opened {
+			logger.Info("incident opened", "err", inc.reason)
 		}
 	} else {
 		logger.Info("check passed")
+		resolved, err := c.resolveIncidents(ctx, r)
+		if err != nil {
+			logger.Error("resolve incidents", "err", err)
+		}
+		for _, inc := range resolved {
+			logger.Info("incident resolved", "err", inc.reason)
+		}
 	}
 
 	if err := c.store.StoreCheckResult(ctx, r); err != nil {
@@ -72,29 +84,45 @@ func (c *Checker) handleResult(ctx context.Context, r checkResult) {
 	}
 }
 
-// recordIncident opens an incident for a failed result unless the endpoint
-// already has an open incident with the same reason.
-func (c *Checker) recordIncident(ctx context.Context, r checkResult) error {
-	reason := deref(r.errMsg, "")
-
+// recordIncident opens one incident per failure reason of a failed result,
+// skipping reasons the endpoint already has an open incident for. It returns
+// the incidents it opened, including those opened before an error.
+func (c *Checker) recordIncident(ctx context.Context, r checkResult) ([]incident, error) {
 	open, err := c.store.OpenIncidents(ctx, r.endpointID)
 	if err != nil {
-		return fmt.Errorf("find open incidents: %w", err)
-	}
-	if slices.ContainsFunc(open, func(inc incident) bool { return inc.reason == reason }) {
-		return nil
+		return nil, fmt.Errorf("find open incidents: %w", err)
 	}
 
-	inc := incident{
-		reason:     reason,
-		startedAt:  r.checkedAt,
-		endpointID: r.endpointID,
+	var opened []incident
+	var errs []error
+	for _, reason := range r.reasons {
+		isKnown := func(inc incident) bool { return inc.reason == reason }
+		if slices.ContainsFunc(open, isKnown) || slices.ContainsFunc(opened, isKnown) {
+			continue
+		}
+
+		inc := incident{
+			reason:     reason,
+			startedAt:  r.checkedAt,
+			endpointID: r.endpointID,
+		}
+		if err := c.store.StoreIncident(ctx, inc); err != nil {
+			errs = append(errs, fmt.Errorf("store incident %q: %w", reason, err))
+			continue
+		}
+		opened = append(opened, inc)
 	}
-	if err := c.store.StoreIncident(ctx, inc); err != nil {
-		return fmt.Errorf("store incident: %w", err)
+	return opened, errors.Join(errs...)
+}
+
+// resolveIncidents resolves every open incident of the endpoint of a passing
+// result and returns the ones it closed.
+func (c *Checker) resolveIncidents(ctx context.Context, r checkResult) ([]incident, error) {
+	resolved, err := c.store.ResolveIncidents(ctx, r.endpointID, r.checkedAt)
+	if err != nil {
+		return nil, fmt.Errorf("resolve incidents: %w", err)
 	}
-	slog.Info("incident opened", "endpoint_id", r.endpointID, "err", inc.reason)
-	return nil
+	return resolved, nil
 }
 
 // checkAllEndpoints starts one goroutine per valid enabled endpoint. The
