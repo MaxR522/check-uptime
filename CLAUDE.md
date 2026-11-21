@@ -1,66 +1,62 @@
 # CLAUDE.md
 
-## STRICT RULE: Claude does not write code
+## Working mode
 
-This is a Go learning project. The user writes all of the code. This rule is strict and has no implicit exceptions.
+Claude writes, edits, and refactors code to finish the project; the user reviews. (Learning phase logs: `docs/learning/`, don't read unless asked.)
 
-Never:
-
-- Create, edit, or delete source files: `.go`, `.templ`, `.sql`, `.js`, `.css`, `.html`, `Makefile`, `go.mod`, `go.sum`, or any other code or build file.
-- Generate or modify code through shell commands (`sed`, heredocs, `go generate`, `templ generate`, `go mod tidy`, `go get`, ...).
-- Apply fixes automatically (`/simplify`, `/code-review --fix`, or similar), even when asked casually in the middle of a task.
-
-If the user asks for a code change, remind them of this rule and ask them to confirm an explicit override before doing anything.
-
-Allowed:
-
-- Read the code and review it.
-- Explain Go concepts, standard library APIs, and design trade-offs.
-- Point out bugs and issues with `file:line` references.
-- Suggest improvements and modifications, describing what to change and why.
-- Give short illustrative code snippets that show a concept or pattern. Snippets should help the user write the code, not be a full drop-in implementation of the feature.
-- Suggest tests the user should write.
-- Run read-only commands and report the results: `go build ./...`, `go vet ./...`, `go test ./...`, `go test -race ./...`, `gofmt -l .`.
-- Edit documentation (`docs/`, `README.md`, this file) only when the user explicitly asks.
-- Write the daily learning log described in "Learning log" below.
-
-## Learning log
-
-At the end of each working day or session (when the user says they are stopping, or asks for it), write a learning log in `docs/learning/YYYY-MM-DD.md`. If a log for that date already exists, add to it instead of creating a new one.
-
-The log is for the user to reread so they don't repeat mistakes. Content:
-
-- Go concepts and idioms learned in the session, each with a short explanation of the why and a small snippet.
-- Mistakes made in the session: what the mistake was, why it was wrong, how to spot it next time. Write it neutrally, as a lesson, not as a list of failures.
-- Standard library APIs used, with the doc behavior that mattered.
-- Tools that helped (gopls analyzers, `go vet`, tests).
-- A short self-review checklist built from the day's mistakes.
-- Open items for the next session.
-
-Base the content only on what happened in the session. Snippets illustrate concepts; they are not copies of the user's solution.
+- Complete, idiomatic Go. Stdlib first; dependencies only from "Decisions". Ask before any other new dependency, a spec change, or a non-additive schema change.
+- One roadmap step at a time (`/roadmap-step`). Each step builds, passes `/verify`, and is a separate commit.
+- Short explanations: what changed and why, a few lines.
+- Commit only when asked. Conventional commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`).
 
 ## Project
 
-- `check-uptime`: monitors websites and their endpoints against expected values (status, response time, body content), records incidents, and sends notifications. Practice project that may become a real tool for the user's own websites.
-- Stack: Go, SQLite, templ, htmx. Monolithic app, single binary.
-- Specification: `docs/spec.md`. Read it before reviewing or suggesting features.
-- Code lives in `cmd/` (entry point) and `internal/monitor/` (domain, checker, service).
-- Make targets: `make run`, `make build`, `make format`, `make preview`.
+`check-uptime` monitors the user's websites and endpoints against expected values (status, response time, body content), records incidents, sends notifications. Single binary: Go, SQLite, templ, htmx.
 
-## How to help
+Docs, read only the sections a task needs: `docs/spec.md` (source of truth for features), `docs/database-schema.md`, `docs/code-architecture.md`.
 
-- Explain the *why*, not only the *what*. The goal is learning.
-- Prefer hints and questions first; give a fuller answer when the user asks or is stuck.
-- Favor idiomatic Go and the standard library. Reference Effective Go, Go Code Review Comments, and `pkg.go.dev` docs.
-- Mention trade-offs when there are several reasonable approaches, and give a recommendation.
-- Keep feedback concrete and prioritized: bugs first, then design, then style.
+Target layout (move code there as steps need it, not all at once; current code is in `cmd/main.go` and `internal/monitor/`):
 
-## Review checklist
+```
+cmd/check-uptime/main.go   config, slog, wiring, signals, graceful shutdown
+internal/monitor/          domain types, assertions, checker, scheduler, incidents, Store interface
+internal/store/sqlite/     Store implementation, embedded migrations
+internal/notify/           Notifier interface, telegram, webhook
+internal/ui/               handlers, routes; views/ (templ), static/ (htmx, CSS, embed.FS)
+```
 
-- Error handling: errors checked, wrapped with context (`fmt.Errorf("...: %w", err)`), not silently ignored.
-- `context.Context` passed through I/O calls and respected for cancellation.
-- Goroutines: no leaks, clear shutdown, no data races (`go test -race`).
-- Resources closed: `resp.Body.Close()`, `rows.Close()`, DB connections.
-- Naming: exported vs unexported, idiomatic names, no stutter (`monitor.MonitorService`).
-- Interfaces: small, defined where they are consumed.
-- Testability: dependencies injected, table-driven tests, `httptest` for HTTP code.
+## Decisions
+
+- Go 1.26: use `sync.WaitGroup.Go`, `new(expr)`, ServeMux method/wildcard patterns, `log/slog`, `errors.Join`.
+- Dependencies: `modernc.org/sqlite` (no cgo), templ as a Go tool. htmx vendored. No ORM, query builder, migration library, or web framework. Details in `/sqlite-store` and `/ui-feature`.
+- Config: flags with env fallback `CHECK_UPTIME_DB`, `CHECK_UPTIME_ADDR`, `CHECK_UPTIME_TELEGRAM_TOKEN`, `CHECK_UPTIME_TELEGRAM_CHAT_ID`, `CHECK_UPTIME_WEBHOOK_URL`.
+- Durations: UI uses `1m`/`5m` strings; DB keeps `interval_check_min` and `timeout_sec`. Convert at the UI boundary.
+- Incidents v1: open on first failure, resolve on first pass, at most one open per endpoint.
+- Notifications: Telegram first, webhook second.
+- Open spec questions (retention, non-GET methods): ask when a step needs them.
+
+## Conventions
+
+- Errors: `fmt.Errorf("load websites: %w", err)`, lowercase, no trailing punctuation. Never drop silently; log intentional drops with `slog`.
+- `context.Context` first parameter of every I/O function, respected for cancellation.
+- Logging: `log/slog` only (replace `log`/`fmt.Println` when touching code). Keys: `website`, `endpoint_id`, `url`, `status`, `duration_ms`, `err`.
+- Small interfaces defined at the consumer (`monitor.Store`, `monitor.Assertion`, `notify.Notifier`). Export domain types only when another package needs them. No stutter.
+- Concurrency: every goroutine has an owner and a context to stop it. Results through channels; shared state behind a mutex. Must pass `go test -race`.
+- Close resources: `resp.Body.Close()`, `rows.Close()`, check `rows.Err()`.
+- Tests: table-driven, `t.Run`, `httptest.Server`, hand-written fakes, no mocking libraries.
+- Make targets: `run`, `build`, `format`, `preview` (update when the entry point moves to `cmd/check-uptime`).
+
+## Roadmap status
+
+Update when a step is done.
+
+1. Domain types and assertions, tests: partial. Types exist (`website`, `endpoint`, `expectation`, `incident`, `checkResult`). `Assertion` interface, `status`/`max_response_time`/`body_contains`, tests missing. Status `>= 400` hard-coded in `checkEndpoint` should move to the `status` assertion.
+2. Checker (`httptest` tests): partial. `checkEndpoint` works with context and body limit; no tests; assertions not evaluated.
+3. Scheduler: partial. Per-endpoint ticker goroutines in `checkAllEndpoints`; no signal handling in `main`; no start/stop/restart of one endpoint schedule.
+4. SQLite store with migrations: not started. `Store` interface exists; `service` returns fake data.
+5. Incident lifecycle: started. `recordIncident` is a stub; `GetIncident` returns fake data and is called with an endpoint ID while the interface names it `incidentID`.
+6. Web UI (CRUD, then dashboard): not started.
+7. Notifier, first channel: not started.
+8. Later: consecutive failure threshold, TLS expiry, authentication.
+
+Known issues to fix in the relevant step: `cmd/main.go` passes a nil `Store` so `SaveResult` panics on the first result; `main` shadows the `context` package; `checkResult.String` prints `id` twice; `recordIncident` errors on the normal "already open" case and its result is ignored.
