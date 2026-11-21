@@ -26,7 +26,7 @@ Status: `done`
 
 ### S2 Checker evaluates assertions
 
-Status: `todo`
+Status: `done`
 
 - Goal: a check fails on request error or any failing assertion, all reasons recorded.
 - Read: spec "Assertions" last paragraph; `checker.go`, `checker_test.go`, `check_result.go`, `endpoint.go`, `assertion.go` (signatures only).
@@ -34,6 +34,7 @@ Status: `todo`
 - Build: endpoint carries parsed assertions; `checkEndpoint` runs all of them and joins reasons (`errors.Join`); remove the hard-coded `>= 400`; `checkResult` gains `passed bool` and the list of failure reasons; error body kept on failure.
 - Ask: endpoint with no `status` assertion: implicit `2xx`/`3xx` default, or pass on any status?
 - Tests: `httptest.Server` cases for each assertion type failing, several failing together, network error, timeout.
+- Notes: `checkResult.errMsg` is all reasons joined by `; `, so an incident reason is that joined string (S3: decide per-reason incidents). `passed` and `reasons` are not persisted yet (S6/S7). Invalid expectations skip the endpoint with a warning.
 
 ### S3 Incident resolve on pass
 

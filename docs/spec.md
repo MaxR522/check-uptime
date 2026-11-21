@@ -48,7 +48,7 @@ Built-in types for v1:
 
 Possible later types: `body_regexp`, `header_equals`, `json_path` (value at a JSON path equals something).
 
-A check fails if the request errors (DNS, connection, timeout) or if any assertion fails. All failed assertion reasons are recorded, not only the first one.
+A check fails if the request errors (DNS, connection, timeout) or if any assertion fails. All failed assertion reasons are recorded, not only the first one. An endpoint without a `status` assertion gets an implicit one: any status below 400 passes (redirects are followed).
 
 ### Incidents
 

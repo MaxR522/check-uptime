@@ -58,8 +58,8 @@ func (c *Checker) handleResult(ctx context.Context, r checkResult) {
 		logger = logger.With("status", *r.code)
 	}
 
-	if r.errMsg != nil {
-		logger.Warn("check failed", "err", *r.errMsg)
+	if !r.passed {
+		logger.Warn("check failed", "err", deref(r.errMsg, ""))
 		if err := c.recordIncident(ctx, r); err != nil {
 			logger.Error("record incident", "err", err)
 		}
@@ -128,12 +128,18 @@ func (c *Checker) checkAllEndpoints(ctx context.Context, websites []website) <-c
 					continue
 				}
 
+				assertions, err := buildAssertions(ep.expectations)
+				if err != nil {
+					slog.Warn("skip endpoint: invalid expectations", "endpoint_id", ep.id, "url", fullURL, "err", err)
+					continue
+				}
+
 				wg.Go(func() {
 					ticker := time.NewTicker(time.Duration(ep.intervalCheckMin) * time.Minute)
 					defer ticker.Stop()
 
 					for {
-						runCheckEndpoint(ctx, c.client, ep, fullURL, resultChan)
+						runCheckEndpoint(ctx, c.client, ep, fullURL, assertions, resultChan)
 
 						select {
 						case <-ctx.Done():
@@ -160,9 +166,9 @@ func buildURL(baseURL, path string) (string, error) {
 	return fullURL, nil
 }
 
-func runCheckEndpoint(ctx context.Context, client *http.Client, ep endpoint, targetURL string, resultChan chan<- checkResult) {
+func runCheckEndpoint(ctx context.Context, client *http.Client, ep endpoint, targetURL string, assertions []Assertion, resultChan chan<- checkResult) {
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Duration(ep.timeoutSec*float64(time.Second)))
-	result := checkEndpoint(ctxWithTimeout, client, targetURL, ep.id)
+	result := checkEndpoint(ctxWithTimeout, client, targetURL, ep.id, assertions)
 	cancel()
 
 	select {
@@ -171,22 +177,30 @@ func runCheckEndpoint(ctx context.Context, client *http.Client, ep endpoint, tar
 	}
 }
 
-// checkEndpoint performs one GET request. durationMs covers the request and
-// the body read, set by the deferred func on every return path.
-func checkEndpoint(ctx context.Context, client *http.Client, target string, endpointID int) (result checkResult) {
+// checkEndpoint performs one GET request and runs every assertion against the
+// response. The check fails on a request error or any failing assertion; all
+// failure reasons are recorded. durationMs covers the request and the body
+// read, set by the deferred func on every return path.
+func checkEndpoint(ctx context.Context, client *http.Client, target string, endpointID int, assertions []Assertion) (result checkResult) {
 	start := time.Now()
 	result = checkResult{checkedAt: start, endpointID: endpointID}
-	defer func() { result.durationMs = time.Since(start).Milliseconds() }()
+	defer func() {
+		result.durationMs = time.Since(start).Milliseconds()
+		result.passed = len(result.reasons) == 0
+		if !result.passed {
+			result.errMsg = new(strings.Join(result.reasons, "; "))
+		}
+	}()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		result.errMsg = new(err.Error())
+		result.reasons = []string{err.Error()}
 		return result
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		result.errMsg = new(err.Error())
+		result.reasons = []string{err.Error()}
 		return result
 	}
 	defer resp.Body.Close()
@@ -195,13 +209,18 @@ func checkEndpoint(ctx context.Context, client *http.Client, target string, endp
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
-		result.errMsg = new(err.Error())
+		result.reasons = []string{err.Error()}
 		return result
 	}
 
-	if resp.StatusCode >= 400 {
+	elapsed := time.Since(start)
+	for _, a := range assertions {
+		if err := a.Check(resp, body, elapsed); err != nil {
+			result.reasons = append(result.reasons, err.Error())
+		}
+	}
+	if len(result.reasons) > 0 {
 		result.errBody = new(truncateUTF8(body, maxErrorBodyBytes))
-		result.errMsg = new(resp.Status)
 	}
 	return result
 }

@@ -18,6 +18,7 @@ func TestCheckEndpoint(t *testing.T) {
 	tests := []struct {
 		name        string
 		handler     http.HandlerFunc
+		exps        []expectation
 		timeout     time.Duration
 		wantCode    int // 0 means no status code
 		wantErr     bool
@@ -72,7 +73,7 @@ func TestCheckEndpoint(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), tt.timeout)
 			defer cancel()
 
-			got := checkEndpoint(ctx, srv.Client(), srv.URL, 7)
+			got := checkEndpoint(ctx, srv.Client(), srv.URL, 7, mustAssertions(t, tt.exps))
 
 			if got.endpointID != 7 {
 				t.Errorf("endpointID = %d, want 7", got.endpointID)
@@ -97,15 +98,147 @@ func TestCheckEndpoint(t *testing.T) {
 	}
 }
 
+func mustAssertions(t *testing.T, exps []expectation) []Assertion {
+	t.Helper()
+	a, err := buildAssertions(exps)
+	if err != nil {
+		t.Fatalf("buildAssertions: %v", err)
+	}
+	return a
+}
+
+func TestCheckEndpointAssertions(t *testing.T) {
+	handler := func(code int, body string, delay time.Duration) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(delay)
+			if code == http.StatusFound && r.URL.Path == "/" {
+				http.Redirect(w, r, "/final", code)
+				return
+			}
+			if code == http.StatusFound {
+				code = http.StatusOK
+			}
+			w.WriteHeader(code)
+			w.Write([]byte(body))
+		}
+	}
+	exp := func(criteria, value string) expectation {
+		return expectation{criteria: criteria, expectedValue: value}
+	}
+
+	tests := []struct {
+		name        string
+		handler     http.HandlerFunc
+		exps        []expectation
+		wantPassed  bool
+		wantReasons []string // substrings, one per expected reason
+	}{
+		{name: "no assertions, 200 passes", handler: handler(200, "ok", 0), wantPassed: true},
+		{name: "no assertions, redirect followed passes", handler: handler(302, "", 0), wantPassed: true},
+		{name: "no assertions, 500 fails by default", handler: handler(500, "", 0), wantReasons: []string{"500"}},
+		{
+			name:       "explicit status overrides default",
+			handler:    handler(500, "", 0),
+			exps:       []expectation{exp("status", "500")},
+			wantPassed: true,
+		},
+		{
+			name:        "status fails",
+			handler:     handler(200, "", 0),
+			exps:        []expectation{exp("status", "201")},
+			wantReasons: []string{"status 200 not in 201"},
+		},
+		{
+			name:        "max_response_time fails",
+			handler:     handler(200, "", 50*time.Millisecond),
+			exps:        []expectation{exp("max_response_time", "10ms")},
+			wantReasons: []string{"response took"},
+		},
+		{
+			name:        "body_contains fails",
+			handler:     handler(200, "hello", 0),
+			exps:        []expectation{exp("body_contains", "world")},
+			wantReasons: []string{"body does not contain"},
+		},
+		{
+			name:       "all assertions pass",
+			handler:    handler(200, "hello world", 0),
+			exps:       []expectation{exp("status", "2xx"), exp("max_response_time", "5s"), exp("body_contains", "world")},
+			wantPassed: true,
+		},
+		{
+			name:    "several fail together",
+			handler: handler(200, "hello", 50*time.Millisecond),
+			exps: []expectation{
+				exp("status", "201"), exp("max_response_time", "10ms"), exp("body_contains", "world"),
+			},
+			wantReasons: []string{"status 200", "response took", "body does not contain"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
+
+			got := checkEndpoint(t.Context(), srv.Client(), srv.URL, 1, mustAssertions(t, tt.exps))
+
+			if got.passed != tt.wantPassed {
+				t.Fatalf("passed = %v, want %v (reasons %q)", got.passed, tt.wantPassed, got.reasons)
+			}
+			if len(got.reasons) != len(tt.wantReasons) {
+				t.Fatalf("reasons = %q, want %d", got.reasons, len(tt.wantReasons))
+			}
+			for i, want := range tt.wantReasons {
+				if !strings.Contains(got.reasons[i], want) {
+					t.Errorf("reasons[%d] = %q, want substring %q", i, got.reasons[i], want)
+				}
+			}
+			if tt.wantPassed && (got.errMsg != nil || got.errBody != nil) {
+				t.Errorf("passed check has errMsg %q errBody %q", deref(got.errMsg, ""), deref(got.errBody, ""))
+			}
+			if !tt.wantPassed && (got.errMsg == nil || got.errBody == nil) {
+				t.Error("failed check missing errMsg or errBody")
+			}
+		})
+	}
+}
+
+func TestBuildAssertions(t *testing.T) {
+	tests := []struct {
+		name    string
+		exps    []expectation
+		want    int
+		wantErr bool
+	}{
+		{name: "none adds default status", want: 1},
+		{name: "status replaces default", exps: []expectation{{criteria: "status", expectedValue: "2xx"}}, want: 1},
+		{name: "other adds default", exps: []expectation{{criteria: "body_contains", expectedValue: "x"}}, want: 2},
+		{name: "unknown criteria", exps: []expectation{{criteria: "nope", expectedValue: "x"}}, wantErr: true},
+		{name: "bad value", exps: []expectation{{criteria: "max_response_time", expectedValue: "fast"}}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildAssertions(tt.exps)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if len(got) != tt.want {
+				t.Errorf("len = %d, want %d", len(got), tt.want)
+			}
+		})
+	}
+}
+
 func TestCheckEndpointConnectionRefused(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	target := srv.URL
 	srv.Close()
 
-	got := checkEndpoint(t.Context(), http.DefaultClient, target, 1)
+	got := checkEndpoint(t.Context(), http.DefaultClient, target, 1, mustAssertions(t, nil))
 
-	if got.errMsg == nil {
-		t.Fatal("errMsg = nil, want connection error")
+	if got.errMsg == nil || got.passed || len(got.reasons) != 1 {
+		t.Fatalf("passed = %v, reasons = %q, want one connection error", got.passed, got.reasons)
 	}
 	if got.code != nil {
 		t.Errorf("code = %d, want nil", *got.code)
@@ -167,7 +300,7 @@ func (f *fakeStore) StoreCheckResult(ctx context.Context, cr checkResult) error 
 }
 
 func TestRecordIncident(t *testing.T) {
-	failed := checkResult{endpointID: 3, errMsg: new("503 Service Unavailable"), checkedAt: time.Now()}
+	failed := checkResult{endpointID: 3, passed: false, errMsg: new("503 Service Unavailable"), checkedAt: time.Now()}
 	errDB := errors.New("db down")
 
 	tests := []struct {
@@ -229,6 +362,7 @@ func TestCheckAllEndpoints(t *testing.T) {
 			{id: 2, path: "disabled", intervalCheckMin: 1, timeoutSec: 1, enabled: false},
 			{id: 3, path: "no-interval", intervalCheckMin: 0, timeoutSec: 1, enabled: true},
 			{id: 4, path: "no-timeout", intervalCheckMin: 1, timeoutSec: 0, enabled: true},
+			{id: 5, path: "bad-exp", intervalCheckMin: 1, timeoutSec: 1, enabled: true, expectations: []expectation{{criteria: "nope", expectedValue: "x"}}},
 		},
 	}}
 

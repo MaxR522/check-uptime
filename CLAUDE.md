@@ -31,6 +31,7 @@ internal/ui/               handlers, routes; views/ (templ), static/ (htmx, CSS,
 - Dependencies: `modernc.org/sqlite` (no cgo), templ as a Go tool. htmx vendored. No ORM, query builder, migration library, or web framework. Details in `/sqlite-store` and `/ui-feature`.
 - Config: flags with env fallback `CHECK_UPTIME_DB`, `CHECK_UPTIME_ADDR`, `CHECK_UPTIME_TELEGRAM_TOKEN`, `CHECK_UPTIME_TELEGRAM_CHAT_ID`, `CHECK_UPTIME_WEBHOOK_URL`.
 - Durations: UI uses `1m`/`5m` strings; DB keeps `interval_check_min` and `timeout_sec`. Convert at the UI boundary.
+- Status default: endpoint without a `status` assertion fails on status >= 400.
 - Incidents v1: open on first failure, resolve all open on first pass, at most one open per endpoint and reason (a new reason opens another incident).
 - Notifications: Telegram first, webhook second.
 - Open spec questions (retention, non-GET methods): ask when a step needs them.
@@ -50,4 +51,4 @@ internal/ui/               handlers, routes; views/ (templ), static/ (htmx, CSS,
 
 Steps, status and per-step reading lists: `docs/roadmap.md`. One step per session; read only that step's block.
 
-Next: S2 (checker evaluates assertions). Assertions done in S1 (`parseAssertion`, registry in `assertion.go`). Existing work already done toward later steps: checker with context, body limit and UTF-8-safe error body (`httptest` tests); per-endpoint ticker goroutines and SIGINT/SIGTERM shutdown; `recordIncident` opens without duplicates per reason; `main` uses in-memory `MemoryStore` until S7.
+Next: S3 (incident resolve on pass). Done: S1 assertions; S2 checker runs assertions (`buildAssertions` in `endpoint.go`, `checkResult.passed`/`reasons`, `errMsg` is reasons joined by `; `). Existing work already done toward later steps: checker with context, body limit and UTF-8-safe error body (`httptest` tests); per-endpoint ticker goroutines and SIGINT/SIGTERM shutdown; `recordIncident` opens without duplicates per reason; `main` uses in-memory `MemoryStore` until S7.

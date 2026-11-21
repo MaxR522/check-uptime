@@ -10,6 +10,8 @@ type checkResult struct {
 	id         int
 	durationMs int64
 	code       *int
+	passed     bool
+	reasons    []string
 	errMsg     *string
 	errBody    *string
 	checkedAt  time.Time
@@ -36,6 +38,7 @@ func (r checkResult) String() string {
 	}
 
 	fmt.Fprintf(&b, "duration=%dms ", r.durationMs)
+	fmt.Fprintf(&b, "passed=%t ", r.passed)
 	fmt.Fprintf(&b, "error=%q ", deref(r.errMsg, ""))
 	fmt.Fprintf(&b, "errorBody=%q ", deref(r.errBody, ""))
 	fmt.Fprintf(&b, "endpoint=%d", r.endpointID)
