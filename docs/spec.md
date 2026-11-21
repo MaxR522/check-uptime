@@ -88,16 +88,7 @@ A check fails if the request errors (DNS, connection, timeout) or if any asserti
 
 ## Roadmap
 
-Suggested order, each step usable and testable on its own:
-
-1. Domain types and assertions, with unit tests.
-2. Checker: perform an HTTP request, measure duration, evaluate assertions (tested with `httptest`).
-3. Scheduler: goroutines, tickers, `context` cancellation, graceful shutdown.
-4. SQLite store implementing the `Store` interface, with migrations.
-5. Incident lifecycle (open / resolve).
-6. Web UI with templ and htmx: website and endpoint CRUD, then dashboard.
-7. Notifier with a first channel.
-8. Later: retry / consecutive failure threshold before opening an incident, TLS certificate expiry, authentication.
+Session-sized steps with status: `docs/roadmap.md`.
 
 ## Open questions
 

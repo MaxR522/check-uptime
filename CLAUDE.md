@@ -46,15 +46,8 @@ internal/ui/               handlers, routes; views/ (templ), static/ (htmx, CSS,
 - Tests: table-driven, `t.Run`, `httptest.Server`, hand-written fakes, no mocking libraries.
 - Make targets: `run`, `build`, `format`, `preview` (all use `./cmd/check-uptime`, binary `bin/check-uptime`).
 
-## Roadmap status
+## Roadmap
 
-Update when a step is done.
+Steps, status and per-step reading lists: `docs/roadmap.md`. One step per session; read only that step's block.
 
-1. Domain types and assertions, tests: partial. Types exist (`website`, `endpoint`, `expectation`, `incident`, `checkResult`). `Assertion` interface, `status`/`max_response_time`/`body_contains`, tests missing. Status `>= 400` hard-coded in `checkEndpoint` should move to the `status` assertion.
-2. Checker (`httptest` tests): partial. `checkEndpoint` works with context, body limit and UTF-8-safe error body; `httptest` tests exist; assertions not evaluated.
-3. Scheduler: partial. Per-endpoint ticker goroutines in `checkAllEndpoints` (tested); SIGINT/SIGTERM cancel via `signal.NotifyContext` in `main`; no start/stop/restart of one endpoint schedule.
-4. SQLite store with migrations: not started. `Store` interface in `internal/monitor/store.go`; `main` uses the in-memory `MemoryStore` (`memstore.go`, sample data) until the SQLite store replaces it.
-5. Incident lifecycle: started. `recordIncident` opens an incident unless `Store.OpenIncidents` has one with the same reason (tested); resolve on pass not done.
-6. Web UI (CRUD, then dashboard): not started.
-7. Notifier, first channel: not started.
-8. Later: consecutive failure threshold, TLS expiry, authentication.
+Next: S1 (assertions). Existing work already done toward later steps: checker with context, body limit and UTF-8-safe error body (`httptest` tests); per-endpoint ticker goroutines and SIGINT/SIGTERM shutdown; `recordIncident` opens without duplicates per reason; `main` uses in-memory `MemoryStore` until S7.
