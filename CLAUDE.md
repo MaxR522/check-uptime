@@ -50,4 +50,4 @@ internal/ui/               handlers, routes; views/ (templ), static/ (htmx, CSS,
 
 Steps, status and per-step reading lists: `docs/roadmap.md`. One step per session; read only that step's block.
 
-Next: S1 (assertions). Existing work already done toward later steps: checker with context, body limit and UTF-8-safe error body (`httptest` tests); per-endpoint ticker goroutines and SIGINT/SIGTERM shutdown; `recordIncident` opens without duplicates per reason; `main` uses in-memory `MemoryStore` until S7.
+Next: S2 (checker evaluates assertions). Assertions done in S1 (`parseAssertion`, registry in `assertion.go`). Existing work already done toward later steps: checker with context, body limit and UTF-8-safe error body (`httptest` tests); per-endpoint ticker goroutines and SIGINT/SIGTERM shutdown; `recordIncident` opens without duplicates per reason; `main` uses in-memory `MemoryStore` until S7.

@@ -15,7 +15,7 @@ Status values: `todo`, `doing`, `done`. Update the status line when a step is fi
 
 ### S1 Assertions
 
-Status: `todo`
+Status: `done`
 
 - Goal: `Assertion` interface and the three v1 types, built from an `expectation` row.
 - Read: spec "Assertions"; `internal/monitor/expectation.go`; skill `/add-assertion`.
