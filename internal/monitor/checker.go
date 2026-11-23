@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -38,16 +37,27 @@ func (c *Checker) RunChecker(ctx context.Context) error {
 		return fmt.Errorf("load websites: %w", err)
 	}
 
-	results := c.checkAllEndpoints(ctx, websites)
+	sched := NewScheduler(ctx, c.client)
+	for _, web := range websites {
+		for _, ep := range web.endpoints {
+			if !ep.enabled {
+				continue
+			}
+			j, err := prepareJob(web, ep)
+			if err != nil {
+				slog.Warn("skip endpoint", "endpoint_id", ep.id, "err", err)
+				continue
+			}
+			sched.Start(j)
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
+			sched.Wait()
 			return nil
-		case r, ok := <-results:
-			if !ok {
-				return nil
-			}
+		case r := <-sched.Results():
 			c.handleResult(ctx, r)
 		}
 	}
@@ -123,66 +133,6 @@ func (c *Checker) resolveIncidents(ctx context.Context, r checkResult) ([]incide
 		return nil, fmt.Errorf("resolve incidents: %w", err)
 	}
 	return resolved, nil
-}
-
-// checkAllEndpoints starts one goroutine per valid enabled endpoint. The
-// returned channel is closed once ctx is done and every goroutine has returned.
-func (c *Checker) checkAllEndpoints(ctx context.Context, websites []website) <-chan checkResult {
-	resultChan := make(chan checkResult)
-
-	go func() {
-		defer close(resultChan)
-		var wg sync.WaitGroup
-
-		for _, web := range websites {
-			for _, ep := range web.endpoints {
-				if !ep.enabled {
-					continue
-				}
-
-				fullURL, err := buildURL(web.baseURL, ep.path)
-				if err != nil {
-					slog.Warn("skip endpoint", "endpoint_id", ep.id, "err", err)
-					continue
-				}
-
-				if ep.intervalCheckMin <= 0 {
-					slog.Warn("skip endpoint: invalid interval", "endpoint_id", ep.id, "url", fullURL, "interval_check_min", ep.intervalCheckMin)
-					continue
-				}
-
-				if ep.timeoutSec <= 0 {
-					slog.Warn("skip endpoint: invalid timeout", "endpoint_id", ep.id, "url", fullURL, "timeout_sec", ep.timeoutSec)
-					continue
-				}
-
-				assertions, err := buildAssertions(ep.expectations)
-				if err != nil {
-					slog.Warn("skip endpoint: invalid expectations", "endpoint_id", ep.id, "url", fullURL, "err", err)
-					continue
-				}
-
-				wg.Go(func() {
-					ticker := time.NewTicker(time.Duration(ep.intervalCheckMin) * time.Minute)
-					defer ticker.Stop()
-
-					for {
-						runCheckEndpoint(ctx, c.client, ep, fullURL, assertions, resultChan)
-
-						select {
-						case <-ctx.Done():
-							return
-						case <-ticker.C:
-						}
-					}
-				})
-			}
-		}
-
-		wg.Wait()
-	}()
-
-	return resultChan
 }
 
 func buildURL(baseURL, path string) (string, error) {

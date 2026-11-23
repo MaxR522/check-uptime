@@ -49,13 +49,14 @@ Status: `done`
 
 ### S4 Scheduler with per-endpoint control
 
-Status: `todo`
+Status: `done`
 
 - Goal: start, restart and stop one endpoint schedule at runtime.
 - Read: spec "Check scheduling"; `checker.go` (`RunChecker`, `checkAllEndpoints`, `runCheckEndpoint`), scheduler tests in `checker_test.go`.
 - Touch: new `internal/monitor/scheduler.go`, `scheduler_test.go`; `checker.go` uses it.
 - Build: `Scheduler` owning a map `endpointID -> cancel` behind a mutex, `Start(ep)`, `Stop(id)`, `Restart(ep)` (stop then start), `Wait()`; goroutines through `sync.WaitGroup.Go`, results on one channel; first check runs immediately, then every interval.
 - Tests: start/stop/restart with a short interval injected for tests, stop of unknown id is a no-op, shutdown via context leaves no goroutine running, all under `-race`.
+- Notes: `prepareJob(website, endpoint) (job, error)` validates (enabled, URL, interval, timeout, expectations) and yields the `job` that `Scheduler.Start`/`Restart` take; S12 builds jobs the same way. `Scheduler` owns the results channel, never closed: receivers stop on ctx, then `Wait()` joins the loops; `Start` after shutdown is a no-op. `unit` field (default `time.Minute`) is the test hook for short intervals. `RunChecker` keeps the scheduler local until S12 adds `service.go`.
 
 ## Phase B: persistence
 

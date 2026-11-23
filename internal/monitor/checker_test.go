@@ -271,47 +271,46 @@ func TestBuildURL(t *testing.T) {
 	}
 }
 
-func TestCheckAllEndpoints(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer srv.Close()
-
-	valid := endpoint{id: 1, path: "ok", intervalCheckMin: 1, timeoutSec: 1, enabled: true}
-	websites := []website{{
-		baseURL: srv.URL,
-		endpoints: []endpoint{
-			valid,
-			{id: 2, path: "disabled", intervalCheckMin: 1, timeoutSec: 1, enabled: false},
-			{id: 3, path: "no-interval", intervalCheckMin: 0, timeoutSec: 1, enabled: true},
-			{id: 4, path: "no-timeout", intervalCheckMin: 1, timeoutSec: 0, enabled: true},
-			{id: 5, path: "bad-exp", intervalCheckMin: 1, timeoutSec: 1, enabled: true, expectations: []expectation{{criteria: "nope", expectedValue: "x"}}},
-		},
-	}}
-
-	ctx, cancel := context.WithCancel(t.Context())
-	c := NewChecker(&fakeStore{})
-	c.client = srv.Client()
-	results := c.checkAllEndpoints(ctx, websites)
-
-	// Every endpoint is checked once immediately; only the valid one runs.
-	select {
-	case r := <-results:
-		if r.endpointID != valid.id {
-			t.Errorf("result for endpoint %d, want %d", r.endpointID, valid.id)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no result for valid endpoint")
+func TestPrepareJob(t *testing.T) {
+	ok := endpoint{id: 1, path: "ok", intervalCheckMin: 1, timeoutSec: 1, enabled: true}
+	with := func(f func(*endpoint)) endpoint {
+		ep := ok
+		f(&ep)
+		return ep
 	}
 
-	cancel()
+	tests := []struct {
+		name    string
+		baseURL string
+		ep      endpoint
+		wantURL string
+		wantErr bool
+	}{
+		{name: "valid", baseURL: "https://example.com", ep: ok, wantURL: "https://example.com/ok"},
+		{name: "disabled", baseURL: "https://example.com", ep: with(func(e *endpoint) { e.enabled = false }), wantErr: true},
+		{name: "no interval", baseURL: "https://example.com", ep: with(func(e *endpoint) { e.intervalCheckMin = 0 }), wantErr: true},
+		{name: "no timeout", baseURL: "https://example.com", ep: with(func(e *endpoint) { e.timeoutSec = 0 }), wantErr: true},
+		{name: "bad expectation", baseURL: "https://example.com", ep: with(func(e *endpoint) {
+			e.expectations = []expectation{{criteria: "nope", expectedValue: "x"}}
+		}), wantErr: true},
+		{name: "bad base url", baseURL: "://bad", ep: ok, wantErr: true},
+	}
 
-	// The next tick is a minute away, so after cancel the channel must close
-	// without another result.
-	select {
-	case r, ok := <-results:
-		if ok {
-			t.Fatalf("unexpected result for endpoint %d", r.endpointID)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("results channel not closed after cancel")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j, err := prepareJob(website{baseURL: tt.baseURL}, tt.ep)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if j.url != tt.wantURL {
+				t.Errorf("url = %q, want %q", j.url, tt.wantURL)
+			}
+			if len(j.assertions) == 0 {
+				t.Error("no assertions, want default status assertion")
+			}
+		})
 	}
 }
